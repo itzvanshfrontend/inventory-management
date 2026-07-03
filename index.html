@@ -35,7 +35,9 @@
   .stat::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--thread)}
   .stat .num{font-size:30px;font-weight:700;font-family:Georgia,serif;line-height:1}
   .stat .lbl{font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-top:7px}
+  .stat .lbl .of{letter-spacing:0;text-transform:none;color:var(--thread);font-weight:600}
   .stat.full::before{background:var(--good)} .stat.part::before{background:var(--warn)} .stat.zero::before{background:var(--bad)}
+  .stat.act::before{background:var(--good)} .stat.dra::before{background:#5f4b8b} .stat.arc::before{background:var(--muted)}
 
   /* controls */
   .controls{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:16px 18px;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end}
@@ -45,6 +47,10 @@
   .fld input:focus,.fld select:focus{outline:none;border-color:var(--thread)}
   .grow{flex:1;min-width:200px}
   .grow input{width:100%}
+  .pricerow{display:flex;gap:6px;align-items:center}
+  .pricerow input{width:74px;min-width:0;border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit}
+  .pricerow input:focus{outline:none;border-color:var(--thread)}
+  .pricerow span{color:var(--muted)}
   .multi{position:relative}
   .multi-btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 11px;font-size:13px;color:var(--ink);font-family:inherit;min-width:170px;text-align:left;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px}
   .multi-btn:hover{border-color:var(--thread)}
@@ -76,6 +82,7 @@
   .q0{color:#c9c0b0} .qlow{color:var(--bad)} .qmid{color:var(--warn)} .qhi{color:var(--good)}
   .badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:10.5px;font-weight:700;letter-spacing:.4px}
   .b-full{background:#e4f0e6;color:var(--good)} .b-part{background:#f6ecd8;color:var(--warn)} .b-zero{background:#f5e2de;color:var(--bad)}
+  .b-draft{background:#ece8f4;color:#5f4b8b} .b-arch{background:#e9e6df;color:var(--muted)}
   .title-cell{font-weight:600}
   .sku{color:var(--muted);font-size:11px}
   .empty{padding:50px;text-align:center;color:var(--muted);font-size:14px}
@@ -124,6 +131,19 @@
         </select>
       </div>
       <div class="fld">
+        <label>Product type</label>
+        <div class="multi" id="typeMulti">
+          <button type="button" class="multi-btn" id="typeBtn">All types <span class="caret">▾</span></button>
+          <div class="multi-panel hidden" id="typePanel">
+            <div class="multi-actions">
+              <button type="button" id="typeAll">All</button>
+              <button type="button" id="typeNone">Clear</button>
+            </div>
+            <div class="multi-opts" id="typeOpts"></div>
+          </div>
+        </div>
+      </div>
+      <div class="fld">
         <label>Has stock in sizes</label>
         <div class="multi" id="sizeMulti">
           <button type="button" class="multi-btn" id="sizeBtn">Any size <span class="caret">▾</span></button>
@@ -147,6 +167,14 @@
             </div>
             <div class="multi-opts" id="nostockOpts"></div>
           </div>
+        </div>
+      </div>
+      <div class="fld">
+        <label>Price range</label>
+        <div class="pricerow">
+          <input type="number" id="priceMin" placeholder="min" min="0">
+          <span>–</span>
+          <input type="number" id="priceMax" placeholder="max" min="0">
         </div>
       </div>
       <div class="fld">
@@ -174,7 +202,7 @@ const SIZE_ORDER = ["XXS","XS","S","M","L","XL","2XL","3XL","4XL","5XL","6XL","7
 const NUMERIC_RE = /^\d{1,3}$/;            // 26, 28, 30 ...
 const GENERIC = new Set(["DEFAULT TITLE","ONE SIZE","FREE SIZE","FREESIZE","TITLE","DEFAULT"]);
 
-let STATE = { rows:[], sizes:[], sort:{key:null,dir:1}, selSizes:new Set(), noStock:new Set() };
+let STATE = { rows:[], sizes:[], sort:{key:null,dir:1}, selSizes:new Set(), noStock:new Set(), selTypes:new Set() };
 
 // ---- size label normalisation ----
 function normSize(raw){
@@ -209,6 +237,9 @@ function rowsToProducts(raw){
   const cTitle  = find(["title"]);
   const cSku    = find(["variant sku","sku"]);
   const cQty    = find(["variant inventory qty","inventory qty","variant inventory quantity","qty"]);
+  const cType   = find(["type","product type"]);
+  const cPrice  = find(["variant price","price"]);
+  const cPStatus= find(["status"]);
   const cO1n=find(["option1 name"]), cO1v=find(["option1 value"]);
   const cO2n=find(["option2 name"]), cO2v=find(["option2 value"]);
   const cO3n=find(["option3 name"]), cO3v=find(["option3 value"]);
@@ -233,10 +264,13 @@ function rowsToProducts(raw){
   for(const r of raw){
     const h = r[cHandle]==null ? "" : String(r[cHandle]).trim();
     if(!h) continue;
-    if(!products.has(h)) products.set(h,{handle:h,title:"",skuRoot:"",sizes:{}});
+    if(!products.has(h)) products.set(h,{handle:h,title:"",skuRoot:"",sizes:{},type:"",price:null,pstatus:""});
     const p = products.get(h);
     const t = cTitle ? String(r[cTitle]??"").trim() : "";
     if(t) p.title = t;                                  // title only on first variant row
+    if(cType){ const ty=String(r[cType]??"").trim(); if(ty && !p.type) p.type = ty; }
+    if(cPrice){ const pv=parseFloat(r[cPrice]); if(!isNaN(pv) && p.price===null) p.price = pv; }
+    if(cPStatus){ const ps=String(r[cPStatus]??"").trim().toLowerCase(); if(ps && !p.pstatus) p.pstatus = ps; }
     const sku = cSku ? String(r[cSku]??"").trim() : "";
     if(sku && !p.skuRoot) p.skuRoot = sku.replace(/[-_]?(XS|S|M|L|XL|\d+XL?|\d{2,3})$/i,"-");
     const sz = sizeOf(r);
@@ -264,6 +298,7 @@ function rowsToProducts(raw){
       handle:p.handle,
       title:p.title || p.handle,
       sku:p.skuRoot || (present.length?"":""),
+      type:p.type||"", price:(p.price===null?null:p.price), pstatus:p.pstatus||"",
       sizes:p.sizes, total, status,
       nSizes:present.length, nStock:withStock.length
     });
@@ -281,21 +316,28 @@ function renderStats(rows){
   const part=rows.filter(r=>r.status==="Partial").length;
   const zero=rows.filter(r=>r.status==="Out of Stock").length;
   const units=rows.reduce((a,r)=>a+r.total,0);
+  const act=rows.filter(r=>r.pstatus==="active").length;
+  const dra=rows.filter(r=>r.pstatus==="draft").length;
+  const arc=rows.filter(r=>r.pstatus==="archived").length;
+  const filtered = rows.length !== STATE.rows.length;
   const el=document.getElementById("stats");
   el.innerHTML=`
-    <div class="stat"><div class="num">${fmt(rows.length)}</div><div class="lbl">Products</div></div>
+    <div class="stat"><div class="num">${fmt(rows.length)}</div><div class="lbl">${filtered?`Matching <span class="of">of ${fmt(STATE.rows.length)}</span>`:"Products"}</div></div>
     <div class="stat full"><div class="num">${fmt(full)}</div><div class="lbl">Full Inventory</div></div>
     <div class="stat part"><div class="num">${fmt(part)}</div><div class="lbl">Partial Stock</div></div>
     <div class="stat zero"><div class="num">${fmt(zero)}</div><div class="lbl">Out of Stock</div></div>
+    <div class="stat act"><div class="num">${fmt(act)}</div><div class="lbl">Active</div></div>
+    <div class="stat dra"><div class="num">${fmt(dra)}</div><div class="lbl">Draft</div></div>
+    <div class="stat arc"><div class="num">${fmt(arc)}</div><div class="lbl">Archived</div></div>
     <div class="stat"><div class="num">${fmt(units)}</div><div class="lbl">Total Units</div></div>`;
 }
 
 function renderHead(){
   const th=document.getElementById("thead");
   const arr=k=> STATE.sort.key===k ? `<span class="arr">${STATE.sort.dir>0?"▲":"▼"}</span>`:"";
-  let h=`<tr><th class="lft" data-k="title">Product${arr("title")}</th>`;
+  let h=`<tr><th class="lft" data-k="title">Product${arr("title")}</th><th class="lft" data-k="type">Type${arr("type")}</th><th data-k="price">Price${arr("price")}</th>`;
   STATE.sizes.forEach(s=> h+=`<th data-k="sz:${s}">${s}${arr("sz:"+s)}</th>`);
-  h+=`<th data-k="total">Total${arr("total")}</th><th data-k="status">Status${arr("status")}</th></tr>`;
+  h+=`<th data-k="total">Total${arr("total")}</th><th data-k="status">Status${arr("status")}</th><th data-k="pstatus">Product${arr("pstatus")}</th></tr>`;
   th.innerHTML=h;
   th.querySelectorAll("th").forEach(t=>t.onclick=()=>{
     const k=t.dataset.k; if(STATE.sort.key===k) STATE.sort.dir*=-1; else {STATE.sort.key=k;STATE.sort.dir=1;}
@@ -308,15 +350,27 @@ function badge(st){
   if(st==="Partial") return `<span class="badge b-part">Partial</span>`;
   return `<span class="badge b-zero">Out</span>`;
 }
+function pbadge(s){
+  if(s==="active") return `<span class="badge b-full">Active</span>`;
+  if(s==="draft") return `<span class="badge b-draft">Draft</span>`;
+  if(s==="archived") return `<span class="badge b-arch">Archived</span>`;
+  return "—";
+}
 
 function applyFilters(){
   const q=document.getElementById("search").value.trim().toLowerCase();
   const st=document.getElementById("fStatus").value;
+  const tySel=STATE.selTypes;
+  const pMin=parseFloat(document.getElementById("priceMin").value);
+  const pMax=parseFloat(document.getElementById("priceMax").value);
   const sel=STATE.selSizes;
   const out=STATE.noStock;
   let rows=STATE.rows.filter(r=>{
     if(q && !(r.title.toLowerCase().includes(q)||r.handle.toLowerCase().includes(q)||(r.sku||"").toLowerCase().includes(q))) return false;
     if(st && r.status!==st) return false;
+    if(tySel.size>0 && !tySel.has(r.type)) return false;
+    if(!isNaN(pMin)){ if(r.price===null || r.price<pMin) return false; }
+    if(!isNaN(pMax)){ if(r.price===null || r.price>pMax) return false; }
     // Has stock: ANY selected size has stock
     if(sel.size>0){ let hit=false; for(const s of sel){ if(r.sizes[s]>0){hit=true;break;} } if(!hit) return false; }
     // No stock: ALL selected sizes are out (zero or not offered)
@@ -328,8 +382,11 @@ function applyFilters(){
     rows=[...rows].sort((a,b)=>{
       let av,bv;
       if(k==="title"){av=a.title.toLowerCase();bv=b.title.toLowerCase();}
+      else if(k==="type"){av=(a.type||"").toLowerCase();bv=(b.type||"").toLowerCase();}
+      else if(k==="price"){av=a.price===null?-1:a.price;bv=b.price===null?-1:b.price;}
       else if(k==="total"){av=a.total;bv=b.total;}
       else if(k==="status"){av=a.status;bv=b.status;}
+      else if(k==="pstatus"){av=a.pstatus;bv=b.pstatus;}
       else if(k.startsWith("sz:")){const s=k.slice(3);av=a.sizes[s]||0;bv=b.sizes[s]||0;}
       if(av<bv) return -1*STATE.sort.dir; if(av>bv) return 1*STATE.sort.dir; return 0;
     });
@@ -340,15 +397,17 @@ function applyFilters(){
 function render(){
   renderHead();
   const rows=applyFilters();
+  renderStats(rows);
   const tb=document.getElementById("tbody");
   document.getElementById("noRows").classList.toggle("hidden", rows.length>0);
   tb.innerHTML=rows.map(r=>{
     let cells=`<td class="lft"><div class="title-cell">${esc(r.title)}</div><div class="sku">${esc(r.handle)}</div></td>`;
+    cells+=`<td class="lft">${esc(r.type||"—")}</td><td class="qty">${r.price===null?"—":fmt(r.price)}</td>`;
     STATE.sizes.forEach(s=>{
       if(s in r.sizes){ const q=r.sizes[s]; cells+=`<td class="qty ${qtyClass(q)}">${q}</td>`; }
       else cells+=`<td class="qty q0">·</td>`;
     });
-    cells+=`<td class="qty">${fmt(r.total)}</td><td>${badge(r.status)}</td>`;
+    cells+=`<td class="qty">${fmt(r.total)}</td><td>${badge(r.status)}</td><td>${pbadge(r.pstatus)}</td>`;
     return `<tr>${cells}</tr>`;
   }).join("");
   document.getElementById("countNote").textContent=`Showing ${rows.length} of ${STATE.rows.length} products`;
@@ -358,15 +417,15 @@ function esc(s){return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">
 // ---- export ----
 function exportXlsx(){
   const rows=applyFilters();
-  const head=["Handle","Title", ...STATE.sizes, "Total Units","Sizes Tracked","Sizes In Stock","Status"];
+  const head=["Handle","Title","Type","Price", ...STATE.sizes, "Total Units","Sizes Tracked","Sizes In Stock","Status","Product Status"];
   const data=rows.map(r=>{
-    const o={Handle:r.handle, Title:r.title};
+    const o={Handle:r.handle, Title:r.title, Type:r.type||"", Price:(r.price===null?"":r.price)};
     STATE.sizes.forEach(s=> o[s] = (s in r.sizes)? r.sizes[s] : "");
-    o["Total Units"]=r.total; o["Sizes Tracked"]=r.nSizes; o["Sizes In Stock"]=r.nStock; o["Status"]=r.status;
+    o["Total Units"]=r.total; o["Sizes Tracked"]=r.nSizes; o["Sizes In Stock"]=r.nStock; o["Status"]=r.status; o["Product Status"]=r.pstatus||"";
     return o;
   });
   const ws=XLSX.utils.json_to_sheet(data,{header:head});
-  ws["!cols"]=head.map((h,i)=> i===0?{wch:40}:i===1?{wch:46}:{wch:10});
+  ws["!cols"]=head.map((h,i)=> i===0?{wch:40}:i===1?{wch:46}:i===2?{wch:22}:{wch:10});
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,"Size-wise Inventory");
   XLSX.writeFile(wb, `size-wise-inventory-${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -391,10 +450,12 @@ function handleFile(file){
         }
       }
       const {rows,sizes}=rowsToProducts(raw);
-      STATE.rows=rows; STATE.sizes=sizes; STATE.sort={key:null,dir:1}; STATE.selSizes=new Set(); STATE.noStock=new Set();
-      ["fStatus","search"].forEach(id=>{const el=document.getElementById(id);if(el)el.value="";});
+      STATE.rows=rows; STATE.sizes=sizes; STATE.sort={key:null,dir:1}; STATE.selSizes=new Set(); STATE.noStock=new Set(); STATE.selTypes=new Set();
+      ["fStatus","search","priceMin","priceMax"].forEach(id=>{const el=document.getElementById(id);if(el)el.value="";});
+      STATE.types=[...new Set(rows.map(r=>r.type).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+      buildTypeFilter(STATE.types);
       buildSizeFilters(sizes);
-      renderStats(rows); render();
+      render();
       document.getElementById("dropSection").classList.add("hidden");
       document.getElementById("dash").classList.remove("hidden");
       document.getElementById("resetBtn").classList.remove("hidden");
@@ -410,8 +471,44 @@ fileInput.onchange=e=>{ if(e.target.files[0]) handleFile(e.target.files[0]); };
 ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("over");}));
 ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("over");}));
 drop.addEventListener("drop",e=>{ if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
-document.getElementById("search").oninput=render;
+function debounce(fn,ms){let t;return()=>{clearTimeout(t);t=setTimeout(fn,ms);};}
+const renderDebounced=debounce(render,250);
+document.getElementById("search").oninput=renderDebounced;
 document.getElementById("fStatus").onchange=render;
+document.getElementById("priceMin").oninput=renderDebounced;
+document.getElementById("priceMax").oninput=renderDebounced;
+
+// product type multi-select
+function buildTypeFilter(types){
+  const opts=document.getElementById("typeOpts");
+  opts.innerHTML=types.map(t=>`<label><input type="checkbox" value="${esc(t)}"> ${esc(t)}</label>`).join("");
+  opts.querySelectorAll("input").forEach(cb=>cb.onchange=()=>{
+    if(cb.checked) STATE.selTypes.add(cb.value); else STATE.selTypes.delete(cb.value);
+    updateTypeBtn(); render();
+  });
+  updateTypeBtn();
+}
+function updateTypeBtn(){
+  const n=STATE.selTypes.size;
+  const btn=document.getElementById("typeBtn");
+  if(n===0) btn.innerHTML='All types <span class="caret">▾</span>';
+  else if(n===1) btn.innerHTML=esc([...STATE.selTypes][0])+' <span class="caret">▾</span>';
+  else btn.innerHTML=n+' types selected <span class="caret">▾</span>';
+}
+document.getElementById("typeBtn").onclick=e=>{ e.stopPropagation(); document.getElementById("typePanel").classList.toggle("hidden"); };
+document.getElementById("typeAll").onclick=()=>{
+  STATE.selTypes=new Set(STATE.types);
+  document.querySelectorAll("#typeOpts input").forEach(cb=>cb.checked=true);
+  updateTypeBtn(); render();
+};
+document.getElementById("typeNone").onclick=()=>{
+  STATE.selTypes.clear();
+  document.querySelectorAll("#typeOpts input").forEach(cb=>cb.checked=false);
+  updateTypeBtn(); render();
+};
+document.addEventListener("click",e=>{
+  if(!document.getElementById("typeMulti").contains(e.target)) document.getElementById("typePanel").classList.add("hidden");
+});
 
 // generic size multi-select, used for both "has stock" and "no stock"
 const PICKERS=[
