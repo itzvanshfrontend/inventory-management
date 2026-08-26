@@ -170,6 +170,18 @@
         </div>
       </div>
       <div class="fld">
+        <label>Size availability</label>
+        <select id="fPct">
+          <option value="">Any</option>
+          <option value="lt20">Less than 20%</option>
+          <option value="20-50">Between 20–50%</option>
+          <option value="lt50">Less than 50%</option>
+          <option value="50-75">Between 50–75%</option>
+          <option value="lt75">Less than 75%</option>
+          <option value="gt75">Above 75%</option>
+        </select>
+      </div>
+      <div class="fld">
         <label>Price range</label>
         <div class="pricerow">
           <input type="number" id="priceMin" placeholder="min" min="0">
@@ -363,12 +375,22 @@ function applyFilters(){
   const tySel=STATE.selTypes;
   const pMin=parseFloat(document.getElementById("priceMin").value);
   const pMax=parseFloat(document.getElementById("priceMax").value);
+  const pctSel=document.getElementById("fPct").value;
   const sel=STATE.selSizes;
   const out=STATE.noStock;
   let rows=STATE.rows.filter(r=>{
     if(q && !(r.title.toLowerCase().includes(q)||r.handle.toLowerCase().includes(q)||(r.sku||"").toLowerCase().includes(q))) return false;
     if(st && r.status!==st) return false;
     if(tySel.size>0 && !tySel.has(r.type)) return false;
+    if(pctSel){
+      const pct = r.nSizes>0 ? (r.nStock/r.nSizes)*100 : 0;
+      if(pctSel==="lt20" && !(pct<20)) return false;
+      if(pctSel==="20-50" && !(pct>=20 && pct<=50)) return false;
+      if(pctSel==="lt50" && !(pct<50)) return false;
+      if(pctSel==="50-75" && !(pct>=50 && pct<=75)) return false;
+      if(pctSel==="lt75" && !(pct<75)) return false;
+      if(pctSel==="gt75" && !(pct>75)) return false;
+    }
     if(!isNaN(pMin)){ if(r.price===null || r.price<pMin) return false; }
     if(!isNaN(pMax)){ if(r.price===null || r.price>pMax) return false; }
     // Has stock: ANY selected size has stock
@@ -417,11 +439,13 @@ function esc(s){return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">
 // ---- export ----
 function exportXlsx(){
   const rows=applyFilters();
-  const head=["Handle","Title","Type","Price", ...STATE.sizes, "Total Units","Sizes Tracked","Sizes In Stock","Status","Product Status"];
+  const head=["Handle","Title","Type","Price", ...STATE.sizes, "Total Units","Sizes Tracked","Sizes In Stock","Size Availability %","Status","Product Status"];
   const data=rows.map(r=>{
     const o={Handle:r.handle, Title:r.title, Type:r.type||"", Price:(r.price===null?"":r.price)};
     STATE.sizes.forEach(s=> o[s] = (s in r.sizes)? r.sizes[s] : "");
-    o["Total Units"]=r.total; o["Sizes Tracked"]=r.nSizes; o["Sizes In Stock"]=r.nStock; o["Status"]=r.status; o["Product Status"]=r.pstatus||"";
+    o["Total Units"]=r.total; o["Sizes Tracked"]=r.nSizes; o["Sizes In Stock"]=r.nStock;
+    o["Size Availability %"]=r.nSizes>0?Math.round((r.nStock/r.nSizes)*100):0;
+    o["Status"]=r.status; o["Product Status"]=r.pstatus||"";
     return o;
   });
   const ws=XLSX.utils.json_to_sheet(data,{header:head});
@@ -451,7 +475,7 @@ function handleFile(file){
       }
       const {rows,sizes}=rowsToProducts(raw);
       STATE.rows=rows; STATE.sizes=sizes; STATE.sort={key:null,dir:1}; STATE.selSizes=new Set(); STATE.noStock=new Set(); STATE.selTypes=new Set();
-      ["fStatus","search","priceMin","priceMax"].forEach(id=>{const el=document.getElementById(id);if(el)el.value="";});
+      ["fStatus","search","priceMin","priceMax","fPct"].forEach(id=>{const el=document.getElementById(id);if(el)el.value="";});
       STATE.types=[...new Set(rows.map(r=>r.type).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
       buildTypeFilter(STATE.types);
       buildSizeFilters(sizes);
@@ -475,6 +499,7 @@ function debounce(fn,ms){let t;return()=>{clearTimeout(t);t=setTimeout(fn,ms);};
 const renderDebounced=debounce(render,250);
 document.getElementById("search").oninput=renderDebounced;
 document.getElementById("fStatus").onchange=render;
+document.getElementById("fPct").onchange=render;
 document.getElementById("priceMin").oninput=renderDebounced;
 document.getElementById("priceMax").oninput=renderDebounced;
 
