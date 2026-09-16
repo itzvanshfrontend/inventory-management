@@ -439,12 +439,19 @@ function esc(s){return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">
 // ---- export ----
 function exportXlsx(){
   const rows=applyFilters();
-  const head=["Handle","Title","Type","Price", ...STATE.sizes, "Total Units","Sizes Tracked","Sizes In Stock","Size Availability %","Status","Product Status"];
+  const head=["Handle","Title","Type","Price", ...STATE.sizes, "Total Units","Sizes Tracked","Sizes In Stock","Size Availability","Status","Product Status"];
+  const bandOf=(r)=>{
+    const pct = r.nSizes>0 ? (r.nStock/r.nSizes)*100 : 0;
+    if(pct<20) return "Less than 20%";
+    if(pct<=50) return "Between 20–50%";
+    if(pct<=75) return "Between 50–75%";
+    return "Above 75%";
+  };
   const data=rows.map(r=>{
     const o={Handle:r.handle, Title:r.title, Type:r.type||"", Price:(r.price===null?"":r.price)};
     STATE.sizes.forEach(s=> o[s] = (s in r.sizes)? r.sizes[s] : "");
     o["Total Units"]=r.total; o["Sizes Tracked"]=r.nSizes; o["Sizes In Stock"]=r.nStock;
-    o["Size Availability %"]=r.nSizes>0?Math.round((r.nStock/r.nSizes)*100):0;
+    o["Size Availability"]=bandOf(r);
     o["Status"]=r.status; o["Product Status"]=r.pstatus||"";
     return o;
   });
